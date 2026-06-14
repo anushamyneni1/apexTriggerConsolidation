@@ -26,7 +26,7 @@ Using the Salesforce CLI, query the org for all active Apex triggers on {objectN
 
 Run:
 ```
-sf data query --query "SELECT Id, Name, TableEnumOrId, UsageBeforeInsert, UsageAfterInsert, UsageBeforeUpdate, UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete, UsageAfterUndelete, Status FROM ApexTrigger WHERE TableEnumOrId = '{objectName}' AND Status = 'Active'" --use-tooling-api
+sf data query --query "SELECT Id, Name, TableEnumOrId, UsageBeforeInsert, UsageAfterInsert, UsageBeforeUpdate, UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete, UsageAfterUndelete, Status FROM ApexTrigger WHERE TableEnumOrId = '{objectName}' AND Status = 'Active'" --use-tooling-api --json
 ```
 
 If zero triggers are returned, tell the user:
@@ -36,7 +36,7 @@ Then stop.
 
 For each trigger found, retrieve its full source body:
 ```
-sf data query --query "SELECT Id, Name, Body FROM ApexTrigger WHERE Name = '{triggerName}'" --use-tooling-api
+sf data query --query "SELECT Id, Name, Body FROM ApexTrigger WHERE Name = '{triggerName}'" --use-tooling-api --json
 ```
 
 Parse each trigger body and identify every Apex class it references
@@ -44,12 +44,12 @@ Parse each trigger body and identify every Apex class it references
 
 For each referenced class, retrieve its source:
 ```
-sf data query --query "SELECT Id, Name, Body FROM ApexClass WHERE Name = '{className}'" --use-tooling-api
+sf data query --query "SELECT Id, Name, Body FROM ApexClass WHERE Name = '{className}'" --use-tooling-api --json
 ```
 
 Check for existing test classes for each trigger:
 ```
-sf data query --query "SELECT Id, Name FROM ApexClass WHERE Name LIKE '%{triggerName}%' AND Name LIKE '%Test%'" --use-tooling-api
+sf data query --query "SELECT Id, Name FROM ApexClass WHERE Name LIKE '%{triggerName}%' AND Name LIKE '%Test%'" --use-tooling-api --json
 ```
 
 Summarize what was retrieved before moving to Step 3:
