@@ -61,10 +61,14 @@ Summarize what was retrieved before moving to Step 3:
 
 ## Step 3 — Analyze Risks
 
-Load the .a4drules/skills/apex-trigger-analysis.md skill.
+**Per-trigger scan:** Load the `.a4drules/skills/apex-trigger-risk-scan.md` skill.
+Apply every analysis dimension from that skill to each trigger individually, one at a time.
+For each trigger, use its source body and all dependent class source bodies as input.
+Produce a per-trigger risk summary and risk register entry for each trigger.
 
-Apply every analysis dimension from the skill to all retrieved trigger source
-code and dependent class source code.
+**Cross-trigger analysis:** Load the `.a4drules/skills/apex-trigger-consolidation-analysis.md` skill.
+Apply every analysis dimension from that skill to all triggers together, using all
+per-trigger scan outputs and all source code as input.
 
 Produce:
 - A per-trigger risk summary
