@@ -77,7 +77,7 @@ For each trigger in the results, write two files:
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <ApexTrigger xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>59.0</apiVersion>
+    <apiVersion>65.0</apiVersion>
     <status>Active</status>
 </ApexTrigger>
 ```
@@ -126,7 +126,7 @@ For each class with a non-empty Body, write two files:
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>59.0</apiVersion>
+    <apiVersion>65.0</apiVersion>
     <status>Active</status>
 </ApexClass>
 ```
@@ -166,7 +166,7 @@ For each test class with a non-empty Body, write two files under `force-app/main
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>59.0</apiVersion>
+    <apiVersion>65.0</apiVersion>
     <status>Active</status>
 </ApexClass>
 ```
