@@ -63,8 +63,9 @@ TARGET=".a4drules"
 
 mkdir -p "$TARGET/skills" "$TARGET/workflows"
 
-curl -sSL "$REPO/.a4drules/skills/apex-trigger-analysis.md"    -o "$TARGET/skills/apex-trigger-analysis.md"
-curl -sSL "$REPO/.a4drules/skills/trigger-consolidation.md"    -o "$TARGET/skills/trigger-consolidation.md"
+curl -sSL "$REPO/.a4drules/skills/apex-trigger-risk-scan.md"                 -o "$TARGET/skills/apex-trigger-risk-scan.md"
+curl -sSL "$REPO/.a4drules/skills/apex-trigger-consolidation-analysis.md"    -o "$TARGET/skills/apex-trigger-consolidation-analysis.md"
+curl -sSL "$REPO/.a4drules/workflows/trigger-consolidation.md"               -o "$TARGET/workflows/trigger-consolidation.md"
 ```
 
 > **Do not pipe this directly from a remote URL** (`curl ... | bash`).
