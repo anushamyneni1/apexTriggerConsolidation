@@ -34,8 +34,9 @@ cd apexTriggerConsolidation
 **2. Copy the skills and workflow into your Salesforce project**
 
 ```bash
-cp -r .a4drules/ /path/to/your/salesforce/project/
+cp -r /path/to/cloned/repo/.a4drules/ /path/to/your/salesforce/project/
 ```
+Note: Replace `/path/to/cloned/repo/` with where you cloned the repo, and `/path/to/your/salesforce/project/` with your Salesforce project root.
 
 The Agentforce extension picks up skills and workflows automatically from the `.a4drules/` directory at the root of your project.
 
@@ -47,7 +48,7 @@ If you'd prefer a script instead of a manual copy, `install.sh` is included in t
 
 ```bash
 # Review the script first
-cat install.sh
+cat /path/to/cloned/repo/install.sh
 
 # Then run it from the root of your Salesforce project
 bash /path/to/apexTriggerConsolidation/install.sh
