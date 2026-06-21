@@ -50,7 +50,7 @@ If you'd prefer a script instead of a manual copy, `install.sh` is included in t
 cat install.sh
 
 # Then run it from the root of your Salesforce project
-bash /path/to/apexTriggerConsolidationation/install.sh
+bash /path/to/apexTriggerConsolidation/install.sh
 ```
 
 The script does the following:
