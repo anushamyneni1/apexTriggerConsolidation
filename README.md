@@ -27,8 +27,8 @@ A set of Agentforce skills, workflows, and documentation for auditing and consol
 **1. Clone this repo**
 
 ```bash
-git clone https://github.com/anushamyneni1/apexTriggerConsolidationation.git
-cd apexTriggerConsolidationation
+git clone https://github.com/anushamyneni1/apexTriggerConsolidation.git
+cd apexTriggerConsolidation
 ```
 
 **2. Copy the skills and workflow into your Salesforce project**
