@@ -20,428 +20,423 @@ Wait for the answer. Use that value as {objectName} throughout all remaining ste
 
 ---
 
-## Step 2 — Retrieve Trigger List
+## Step 2 — Discover and Filter Triggers on Object
 
-**IMPORTANT: Use the Bash tool to run the CLI command below. Do NOT use any MCP Salesforce tool for this step.**
+> **Rules for this step and all retrieval steps below:**
+> - Use Salesforce CLI commands only. Never use any MCP Salesforce tool for retrieval.
+> - Use the Salesforce Metadata API (via `sf project retrieve start`) for all file retrieval — this ensures correct file syntax and structure on disk.
+> - Ignore all managed package components. Any component with a non-empty `NamespacePrefix` is a managed package component and must be excluded before retrieval.
 
-Run a single query to get all active triggers on {objectName}:
+Query the org with the Tooling API to discover all active triggers on {objectName}:
 
+```bash
+sf data query \
+  --query "SELECT Id, Name, NamespacePrefix, TableEnumOrId, UsageBeforeInsert, UsageAfterInsert, UsageBeforeUpdate, UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete, UsageAfterUndelete, Status FROM ApexTrigger WHERE TableEnumOrId = '{objectName}' AND Status = 'Active'" \
+  --use-tooling-api --json
 ```
-sf data query --query "SELECT Id, Name, NamespacePrefix, TableEnumOrId, UsageBeforeInsert, UsageAfterInsert, UsageBeforeUpdate, UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete, UsageAfterUndelete, Status FROM ApexTrigger WHERE TableEnumOrId = '{objectName}' AND Status = 'Active'" --use-tooling-api --json
-```
 
-From the results, **exclude any trigger where `NamespacePrefix` is non-null and non-empty** — those are managed package triggers and must be ignored for the rest of this workflow.
+From the results, filter immediately:
+- Keep only triggers where `NamespacePrefix` is null or empty — these are unmanaged triggers.
+- Discard any trigger where `NamespacePrefix` is non-empty. These are managed package triggers and will not be retrieved, analyzed, or consolidated at any point in this workflow.
 
-If zero unmanaged triggers remain after filtering, tell the user:
-"No active unmanaged triggers found on {objectName}. Please check the object API name and
-confirm unmanaged triggers exist in the connected org."
+If no unmanaged triggers remain, tell the user:
+"No active unmanaged triggers found on {objectName}. Please verify the object API name and confirm unmanaged triggers exist in the connected org."
 Then stop.
 
-Record the filtered list of unmanaged trigger names as {triggerList}.
+Record the filtered list as **{triggerList}**. All remaining steps operate only on {triggerList}.
 
-**Checkpoint 2a — print before continuing:**
+**Checkpoint 2 — print before continuing:**
 ```
-CHECKPOINT 2a
+CHECKPOINT 2
 Object: {objectName}
-Triggers found (total): {count}
-Managed (excluded): {count} — {list names with their namespace prefix, or 'none'}
-Unmanaged (in scope): {count}
-Names: {triggerList}
+Total active triggers found: {count}
+Managed (ignored): {count} — {names + namespace prefix, or 'none'}
+Unmanaged triggers in scope: {count}
+{triggerList}: {names}
 ```
 
 ---
 
-## Step 3 — Retrieve Trigger Bodies (Batched)
+## Step 3 — Retrieve Triggers Locally via Metadata API
 
-**IMPORTANT: Use the Bash tool to run the CLI command below. Do NOT use any MCP Salesforce tool for this step.**
+This step retrieves trigger source files into the local project using the Salesforce Metadata API so the correct `.trigger` and `.trigger-meta.xml` syntax is on disk.
 
-Build a single IN-list query using all names from {triggerList}:
+Ask the user:
 
-```
-sf data query --query "SELECT Id, Name, Body FROM ApexTrigger WHERE Name IN ('{name1}','{name2}',...)" --use-tooling-api --json
-```
+> "Ready to retrieve {count} ApexTrigger(s) for {objectName}:
+>   {triggerList}
+> Retrieve now? (YES / NO)"
 
-Store each trigger's Body. Do not run one query per trigger.
+If NO, stop.
 
-**Step 3b — Save each trigger body to disk for local validation.**
+Build one `--metadata` flag per name in {triggerList} and run:
 
-First create the directory:
 ```bash
-mkdir -p force-app/main/default/triggers
+sf project retrieve start \
+  --metadata "ApexTrigger:{name1}" \
+  --metadata "ApexTrigger:{name2}" \
+  ...
 ```
 
-For each trigger in the results, write two files:
+The CLI writes files directly to `force-app/main/default/triggers/`. Do not create directories or write files manually.
 
-1. `force-app/main/default/triggers/{triggerName}.trigger` — the raw Body from the query
-2. `force-app/main/default/triggers/{triggerName}.trigger-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<ApexTrigger xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>65.0</apiVersion>
-    <status>Active</status>
-</ApexTrigger>
-```
+After retrieval, verify the files exist on disk:
 
-Write one trigger at a time and print `SAVED: {triggerName}.trigger` after each.
-
-**Checkpoint 3a — print before continuing:**
-```
-CHECKPOINT 3a
-Bodies retrieved: {count}/{count}
-Saved to disk: {count}
-Any failures: {none | list names that returned empty Body}
-```
-
----
-
-## Step 4 — Identify and Retrieve Dependent Classes (Batched)
-
-**IMPORTANT: Use the Bash tool to run the CLI command below. Do NOT use any MCP Salesforce tool for this step.**
-
-Parse each trigger body and collect every Apex class name referenced
-(handler, helper, utility, service classes).
-
-Build a single IN-list query for all referenced class names at once:
-
-```
-sf data query --query "SELECT Id, Name, Body FROM ApexClass WHERE Name IN ('{class1}','{class2}',...)" --use-tooling-api --json
-```
-
-If the class name set is empty (no external classes referenced), skip this query.
-
-Mark any class whose Body is empty or null as **unreadable** (managed package).
-Do not retry unreadable classes.
-
-**Step 4b — Save each readable class body to disk for local validation.**
-
-First create the directory:
 ```bash
-mkdir -p force-app/main/default/classes
+ls force-app/main/default/triggers/
 ```
 
-For each class with a non-empty Body, write two files:
-
-1. `force-app/main/default/classes/{className}.cls` — the raw Body from the query
-2. `force-app/main/default/classes/{className}.cls-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>65.0</apiVersion>
-    <status>Active</status>
-</ApexClass>
+**Checkpoint 3 — print before continuing:**
 ```
-
-Write one class at a time and print `SAVED: {className}.cls` after each.
-Skip unreadable (managed) classes — do not write empty files.
-
-**Checkpoint 4a — print before continuing:**
-```
-CHECKPOINT 4a
-Referenced classes identified: {count}
-Classes retrieved: {count}
-Saved to disk: {count}
-Unreadable (managed): {list or none}
+CHECKPOINT 3
+Metadata type retrieved: ApexTrigger
+Files stored in: force-app/main/default/triggers/
+Retrieved: {list of .trigger filenames confirmed on disk}
+Missing / not retrieved: {list or none}
 ```
 
 ---
 
-## Step 5 — Retrieve Test Classes (Batched)
+## Step 4 — Identify Dependent Apex Classes and Retrieve by Type
 
-**IMPORTANT: Use the Bash tool to run the CLI command below. Do NOT use any MCP Salesforce tool for this step.**
+Read the retrieved trigger files to identify every dependent Apex class — handlers, helpers, utilities, services, and test classes:
 
-Build a single query to retrieve the Name and Body of test classes for all triggers at once:
-
-```
-sf data query --query "SELECT Id, Name, Body FROM ApexClass WHERE (Name LIKE '%{trigger1}%' OR Name LIKE '%{trigger2}%' ...) AND Name LIKE '%Test%'" --use-tooling-api --json
+```bash
+cat force-app/main/default/triggers/*.trigger
 ```
 
-Record which test classes exist for which triggers.
+Collect every class name referenced via:
+- Instantiation: `new ClassName()`
+- Static call: `ClassName.method()`
+- Test class naming convention: class names containing a trigger name + `Test`
 
-**Step 5b — Save each test class body to disk for local validation.**
+Exclude any class from a managed package (any class whose name resolves to a namespaced component in the org). Managed classes that cannot be retrieved by the CLI will simply be absent from disk after retrieval — note them in the checkpoint.
 
-For each test class with a non-empty Body, write two files under `force-app/main/default/classes/`:
+If no classes are identified, print:
+```
+CHECKPOINT 4 — no dependent Apex classes found, skipping to Step 5
+```
+and continue.
 
-1. `force-app/main/default/classes/{testClassName}.cls` — the raw Body from the query
-2. `force-app/main/default/classes/{testClassName}.cls-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>65.0</apiVersion>
-    <status>Active</status>
-</ApexClass>
+Otherwise, present the class list and ask:
+
+> "Found {count} dependent Apex class(es) for {objectName} triggers:
+>   {classList}
+> Retrieve now? (YES / NO)"
+
+If NO, note that class bodies will not be available for analysis and continue to Step 5.
+
+If YES:
+
+```bash
+sf project retrieve start \
+  --metadata "ApexClass:{class1}" \
+  --metadata "ApexClass:{class2}" \
+  ...
 ```
 
-Write one class at a time and print `SAVED: {testClassName}.cls` after each.
+The CLI writes files to `force-app/main/default/classes/`.
 
-**Checkpoint 5a — print before continuing:**
-```
-CHECKPOINT 5a
-Test classes found: {count}
-Saved to disk: {count}
-Coverage: {list trigger → test class name, or 'none' if missing}
+After retrieval, verify:
+
+```bash
+ls force-app/main/default/classes/
 ```
 
----
-
-## Step 5c — Retrieve Custom Metadata Types and Records Referenced by Triggers
-
-**IMPORTANT: Use the Bash tool for all CLI commands below. Do NOT use any MCP Salesforce tool for this step.**
-
-Parse every trigger body and dependent class body already retrieved. Collect every Custom Metadata type name referenced — these appear as `{TypeName}__mdt` in SOQL queries or dot-notation reads (e.g. `{TypeName}__mdt.getInstance()`, `[SELECT ... FROM {TypeName}__mdt]`).
-
-If no Custom Metadata types are referenced, print:
+**Checkpoint 4 — print before continuing:**
 ```
-CHECKPOINT 5c — no Custom Metadata types referenced, skipping
-```
-and continue to Step 6.
-
-Otherwise, for each unique `{TypeName}__mdt` found:
-
-### 5c-i — Retrieve the type schema (field definitions)
-
-**IMPORTANT: Use the Bash tool to run the CLI command below. Do NOT use any MCP Salesforce tool for this step.**
-
-```
-sf data query --query "SELECT Id, DeveloperName, Label, QualifiedApiName FROM CustomObject WHERE QualifiedApiName = '{TypeName}__mdt'" --use-tooling-api --json
-```
-
-Then retrieve all custom fields for the type:
-
-```
-sf data query --query "SELECT Id, DeveloperName, Label, DataType FROM CustomField WHERE TableEnumOrId = '{TypeName}__mdt'" --use-tooling-api --json
-```
-
-Save the schema to disk:
-
-1. Run: `mkdir -p force-app/main/default/objects/{TypeName}__mdt/fields`
-
-2. Write `force-app/main/default/objects/{TypeName}__mdt/{TypeName}__mdt.object-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">
-    <label>{Label from query}</label>
-    <pluralLabel>{Label from query}s</pluralLabel>
-    <visibility>Public</visibility>
-</CustomObject>
-```
-
-3. For each custom field returned, write `force-app/main/default/objects/{TypeName}__mdt/fields/{FieldDeveloperName}__c.field-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
-    <fullName>{FieldDeveloperName}__c</fullName>
-    <label>{FieldLabel}</label>
-    <type>{DataType mapped to Metadata API type}</type>
-</CustomField>
-```
-
-Print `SAVED SCHEMA: {TypeName}__mdt ({n} fields)` after each type.
-
-### 5c-ii — Retrieve the records
-
-**IMPORTANT: Use the Bash tool to run the CLI command below. Do NOT use any MCP Salesforce tool for this step.**
-
-Query all records for this type, selecting every custom field retrieved in 5c-i:
-
-```
-sf data query --query "SELECT Id, DeveloperName, Label, {field1}__c, {field2}__c, ... FROM {TypeName}__mdt" --json
-```
-
-Save each record to disk under `force-app/main/default/customMetadata/`. Run `mkdir -p force-app/main/default/customMetadata` first.
-
-For each record, write `force-app/main/default/customMetadata/{TypeName}.{DeveloperName}.md-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<CustomMetadata xmlns="http://soap.sforce.com/2006/04/metadata"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-    <label>{Label from record}</label>
-    <protected>false</protected>
-    <values>
-        <field>{FieldDeveloperName}__c</field>
-        <value xsi:type="xsd:{xsdType}">{value}</value>
-    </values>
-    <!-- one <values> block per custom field -->
-</CustomMetadata>
-```
-
-Print `SAVED RECORD: {TypeName}.{DeveloperName}.md-meta.xml` after each record.
-
-**Checkpoint 5c — print after all types are processed:**
-```
-CHECKPOINT 5c
-Custom Metadata types found in code: {list or none}
-Schema files written: {count}
-Record files written: {count}
+CHECKPOINT 4
+Metadata type retrieved: ApexClass
+Files stored in: force-app/main/default/classes/
+Retrieved: {count} — {names confirmed on disk}
+Not retrieved (managed or missing): {list or none}
 ```
 
 ---
 
-## Step 5d — Scan and Retrieve Named Credentials
+## Step 5 — Retrieve Remaining Dependent Components by Type
 
-**IMPORTANT: Use the Bash tool for all CLI commands below. Do NOT use any MCP Salesforce tool for this step.**
+Scan all files retrieved so far to build a full dependency manifest before retrieving anything:
 
-Scan every trigger body and dependent class body already retrieved for Named Credential references.
-Look for patterns: `callout:{name}`, `HttpRequest.setEndpoint('callout:{name}')`, `'callout:{name}/`.
-
-If none found, print:
-```
-CHECKPOINT 5d — no Named Credentials referenced, skipping
-```
-and continue to Step 5e.
-
-Otherwise, retrieve all referenced Named Credentials in a single query:
-
-```
-sf data query --query "SELECT Id, DeveloperName, Endpoint, PrincipalType, Protocol FROM NamedCredential WHERE DeveloperName IN ('{name1}','{name2}',...)" --use-tooling-api --json
+```bash
+cat force-app/main/default/triggers/*.trigger force-app/main/default/classes/*.cls 2>/dev/null
 ```
 
-Run `mkdir -p force-app/main/default/namedCredentials` first.
+Scan for references to these metadata types:
 
-For each Named Credential returned, write `force-app/main/default/namedCredentials/{DeveloperName}.namedCredential-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<NamedCredential xmlns="http://soap.sforce.com/2006/04/metadata">
-    <label>{DeveloperName}</label>
-    <endpoint>{Endpoint}</endpoint>
-    <protocol>{Protocol}</protocol>
-    <principalType>{PrincipalType}</principalType>
-</NamedCredential>
+| Type | Pattern to look for |
+|---|---|
+| Custom Metadata | `{TypeName}__mdt` in SOQL or `.getInstance()` |
+| Named Credentials | `callout:{name}` in endpoint strings |
+| Static Resources | `Test.loadData(...)`, `'/resource/{name}'`, `PageReference('/resource/{name}')` |
+| Custom Labels | `Label.{LabelName}`, `System.Label.{LabelName}` |
+| Platform Events | `new {EventName}__e(...)`, `EventBus.publish(...)`, `FROM {EventName}__e` |
+| Custom Settings | `{SettingName}__c.getInstance()`, `getOrgDefaults()`, `getValues(...)` |
+| Email Templates | `setTemplateId(...)`, `Messaging.renderStoredEmailTemplate(...)` |
+| Flows | `Flow.Interview.{FlowApiName}`, `new Flow.Interview.{FlowApiName}()` |
+
+Print the full manifest before retrieving anything:
+```
+DEPENDENCY MANIFEST
+Custom Metadata Types: {list or none}
+Named Credentials: {list or none}
+Static Resources: {list or none}
+Custom Labels: {list or none}
+Platform Events: {list or none}
+Custom Settings: {list or none}
+Email Templates: {list or none}
+Flows: {list or none}
 ```
 
-Print `SAVED: {DeveloperName}.namedCredential-meta.xml` after each.
+**Retrieve one metadata type at a time.** This avoids timeout issues caused by retrieving large mixed batches in a single call. For each type below, ask for user confirmation before running the retrieve command.
 
-**Checkpoint 5d — print after processing:**
+---
+
+### Step 5a — Custom Metadata Types
+
+If none found, print `CHECKPOINT 5a — no Custom Metadata Types referenced, skipping` and move to 5b.
+
+Otherwise, ask:
+
+> "Retrieve Custom Metadata Types: {list}?
+> (Retrieves object schema + records. Recommended — required for trigger analysis.)
+> Retrieve now? (YES / NO)"
+
+If YES, retrieve **one type at a time** — schema first, then records:
+
+```bash
+# Object schema
+sf project retrieve start --metadata "CustomObject:{TypeName}__mdt"
+
+# Records
+sf project retrieve start --metadata "CustomMetadata:{TypeName}__mdt"
 ```
-CHECKPOINT 5d
-Named Credentials referenced in code: {list or none}
-Files written: {count}
+
+Repeat for each type. The CLI writes schema to `force-app/main/default/objects/{TypeName}__mdt/` and records to `force-app/main/default/customMetadata/`. Do not write files manually.
+
+**Checkpoint 5a:**
+```
+CHECKPOINT 5a — Custom Metadata Types
+Retrieved: {list or none}
+Schema: force-app/main/default/objects/
+Records: force-app/main/default/customMetadata/
 ```
 
 ---
 
-## Step 5e — Scan and Retrieve Static Resources
+### Step 5b — Named Credentials
 
-**IMPORTANT: Use the Bash tool for all CLI commands below. Do NOT use any MCP Salesforce tool for this step.**
+If none found, print `CHECKPOINT 5b — no Named Credentials referenced, skipping` and move to 5c.
 
-Scan every trigger body and dependent class body for Static Resource references.
-Look for patterns: `Test.loadData(...)`, `PageReference('/resource/{name}')`, `'/resource/{name}'`.
+Otherwise, ask:
 
-If none found, print:
-```
-CHECKPOINT 5e — no Static Resources referenced, skipping
-```
-and continue to Step 5f.
+> "Retrieve Named Credentials: {list}? (YES / NO)"
 
-Otherwise, retrieve metadata for all referenced Static Resources in a single query:
+If YES:
 
-```
-sf data query --query "SELECT Id, Name, ContentType, CacheControl FROM StaticResource WHERE Name IN ('{name1}','{name2}',...)" --use-tooling-api --json
+```bash
+sf project retrieve start \
+  --metadata "NamedCredential:{name1}" \
+  --metadata "NamedCredential:{name2}" \
+  ...
 ```
 
-Note: Static Resource bodies (binaries, ZIPs) are not retrieved here — only the metadata stub is written so the SFDX project is aware of the dependency.
+Files stored in `force-app/main/default/namedCredentials/`.
 
-Run `mkdir -p force-app/main/default/staticresources` first.
-
-For each Static Resource returned, write `force-app/main/default/staticresources/{Name}.resource-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<StaticResource xmlns="http://soap.sforce.com/2006/04/metadata">
-    <cacheControl>{CacheControl}</cacheControl>
-    <contentType>{ContentType}</contentType>
-</StaticResource>
+**Checkpoint 5b:**
 ```
-
-Print `SAVED STUB: {Name}.resource-meta.xml` after each. Note in the checkpoint that binary content must be retrieved separately with `sf project retrieve start`.
-
-**Checkpoint 5e — print after processing:**
-```
-CHECKPOINT 5e
-Static Resources referenced in code: {list or none}
-Metadata stubs written: {count}
-Note: binary content not retrieved — run sf project retrieve start to pull full files
+CHECKPOINT 5b — Named Credentials
+Retrieved: {list or none}
+Files: force-app/main/default/namedCredentials/
 ```
 
 ---
 
-## Step 5f — Scan and Retrieve Custom Labels
+### Step 5c — Static Resources
 
-**IMPORTANT: Use the Bash tool for all CLI commands below. Do NOT use any MCP Salesforce tool for this step.**
+If none found, print `CHECKPOINT 5c — no Static Resources referenced, skipping` and move to 5d.
 
-Scan every trigger body and dependent class body for Custom Label references.
-Look for patterns: `Label.{LabelName}`, `System.Label.{LabelName}`.
+Otherwise, ask:
 
-If none found, print:
-```
-CHECKPOINT 5f — no Custom Labels referenced, skipping
-```
-and continue to Step 5g.
+> "Retrieve Static Resources: {list}? (YES / NO)"
 
-Otherwise, retrieve all referenced labels in a single query using an IN clause:
+If YES:
 
-```
-sf data query --query "SELECT Id, Name, Value, Language, Protected FROM ExternalString WHERE Name IN ('{label1}','{label2}',...)" --use-tooling-api --json
+```bash
+sf project retrieve start \
+  --metadata "StaticResource:{name1}" \
+  --metadata "StaticResource:{name2}" \
+  ...
 ```
 
-Run `mkdir -p force-app/main/default/labels` first.
+Files stored in `force-app/main/default/staticresources/`.
 
-Check if `force-app/main/default/labels/CustomLabels.labels-meta.xml` exists.
-
-- If it does not exist, write a new file with all labels as `<labels>` entries.
-- If it already exists, use the Edit tool to append new `<labels>` entries inside the root `<CustomLabels>` element.
-
-File format:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<CustomLabels xmlns="http://soap.sforce.com/2006/04/metadata">
-    <labels>
-        <fullName>{Name}</fullName>
-        <language>{Language}</language>
-        <protected>{Protected}</protected>
-        <shortDescription>{Name}</shortDescription>
-        <value>{Value}</value>
-    </labels>
-    <!-- one <labels> block per referenced label -->
-</CustomLabels>
+**Checkpoint 5c:**
 ```
-
-Print `SAVED: CustomLabels.labels-meta.xml ({n} labels)`.
-
-**Checkpoint 5f — print after processing:**
-```
-CHECKPOINT 5f
-Custom Labels referenced in code: {list or none}
-Labels written to file: {count}
+CHECKPOINT 5c — Static Resources
+Retrieved: {list or none}
+Files: force-app/main/default/staticresources/
 ```
 
 ---
 
-## Step 5g — Scan for Platform Events
+### Step 5d — Custom Labels
 
-**IMPORTANT: Use the Bash tool for all CLI commands below. Do NOT use any MCP Salesforce tool for this step.**
+If none found, print `CHECKPOINT 5d — no Custom Labels referenced, skipping` and move to 5e.
 
-Scan every trigger body and dependent class body for Platform Event references.
-Look for patterns: `EventBus.publish(...)`, `new {EventName}__e(...)`, `[SELECT ... FROM {EventName}__e]`.
+Otherwise, ask:
 
-If none found, print:
-```
-CHECKPOINT 5g — no Platform Events referenced, skipping
-```
-and continue to Step 6.
+> "Retrieve Custom Labels? (YES / NO)"
 
-Otherwise, retrieve the Platform Event object definitions:
+If YES:
 
-```
-sf data query --query "SELECT Id, DeveloperName, Label FROM PlatformEventChannel WHERE DeveloperName IN ('{event1}','{event2}',...)" --use-tooling-api --json
+```bash
+sf project retrieve start --metadata "CustomLabels"
 ```
 
-Do not write schema files for Platform Events — they are managed in the org. Instead, record the names and usage for the audit plan's External Dependencies section.
+File stored at `force-app/main/default/labels/CustomLabels.labels-meta.xml`.
 
-**Checkpoint 5g — print after processing:**
+**Checkpoint 5d:**
 ```
-CHECKPOINT 5g
-Platform Events referenced in code: {list or none}
-Note: Platform Event schemas are not scaffolded — listed in audit plan External Dependencies only
+CHECKPOINT 5d — Custom Labels
+Retrieved: {YES / skipped}
+File: force-app/main/default/labels/CustomLabels.labels-meta.xml
+```
+
+---
+
+### Step 5e — Platform Events
+
+If none found, print `CHECKPOINT 5e — no Platform Events referenced, skipping` and move to Step 6.
+
+Otherwise, ask:
+
+> "Retrieve Platform Event object definitions: {list}? (YES / NO)"
+
+If YES, retrieve one event at a time:
+
+```bash
+sf project retrieve start --metadata "CustomObject:{EventName}__e"
+```
+
+Files stored in `force-app/main/default/objects/`. Note: only object definitions are retrieved — platform event channel subscriptions are managed in the org and are not scaffolded.
+
+**Checkpoint 5e:**
+```
+CHECKPOINT 5e — Platform Events
+Retrieved: {list or none}
+Files: force-app/main/default/objects/
+```
+
+---
+
+### Step 5f — Custom Settings
+
+If none found, print `CHECKPOINT 5f — no Custom Settings referenced, skipping` and move to 5g.
+
+Scan for: `{SettingName}__c.getInstance()`, `{SettingName}__c.getOrgDefaults()`, `{SettingName}__c.getValues(...)`.
+
+Note: Custom Settings share the `__c` suffix with Custom Objects but are a distinct metadata type — only retrieve objects confirmed to be Custom Settings via the pattern above, not every `__c` reference.
+
+Ask:
+
+> "Retrieve Custom Settings: {list}? (YES / NO)"
+
+If YES, retrieve one at a time:
+
+```bash
+sf project retrieve start --metadata "CustomObject:{SettingName}__c"
+```
+
+Files stored in `force-app/main/default/objects/{SettingName}__c/`.
+
+**Checkpoint 5f:**
+```
+CHECKPOINT 5f — Custom Settings
+Retrieved: {list or none}
+Files: force-app/main/default/objects/
+```
+
+---
+
+### Step 5g — Email Templates
+
+If none found, print `CHECKPOINT 5g — no Email Templates referenced, skipping` and move to 5h.
+
+Scan for: `setTemplateId(...)`, `Messaging.renderStoredEmailTemplate(...)`, `templateName` string literals matching a known template name pattern.
+
+Note: Email Templates are stored in folders. The retrieve path is `EmailTemplate:{FolderName}/{TemplateName}`. If the folder name is not identifiable from the code, flag the template for manual retrieval.
+
+Ask:
+
+> "Retrieve Email Templates: {list}? (YES / NO)"
+
+If YES:
+
+```bash
+sf project retrieve start \
+  --metadata "EmailTemplate:{FolderName1}/{TemplateName1}" \
+  --metadata "EmailTemplate:{FolderName2}/{TemplateName2}" \
+  ...
+```
+
+Files stored in `force-app/main/default/email/{FolderName}/`.
+
+For any template where the folder cannot be determined from the code, print:
+`SKIPPED: {TemplateName} — folder name unknown, retrieve manually`
+
+**Checkpoint 5g:**
+```
+CHECKPOINT 5g — Email Templates
+Retrieved: {list or none}
+Skipped (folder unknown): {list or none}
+Files: force-app/main/default/email/
+```
+
+---
+
+### Step 5h — Flows Invoked from Apex
+
+If none found, print `CHECKPOINT 5h — no Flows referenced, skipping` and move to the overall Step 5 checkpoint.
+
+Scan for: `Flow.Interview.{FlowApiName}`, `new Flow.Interview.{FlowApiName}()`, `Database.executeBatch` with a flow class name, and `Invocable` method references that resolve to a flow name.
+
+Ask:
+
+> "Retrieve Flows: {list}? (YES / NO)"
+
+If YES:
+
+```bash
+sf project retrieve start \
+  --metadata "Flow:{FlowApiName1}" \
+  --metadata "Flow:{FlowApiName2}" \
+  ...
+```
+
+Files stored in `force-app/main/default/flows/`.
+
+**Checkpoint 5h:**
+```
+CHECKPOINT 5h — Flows
+Retrieved: {list or none}
+Files: force-app/main/default/flows/
+```
+
+---
+
+**Checkpoint 5 — print after all types are processed:**
+```
+CHECKPOINT 5 — ALL DEPENDENT COMPONENTS RETRIEVED
+Custom Metadata Types: {list or skipped}
+Named Credentials: {list or skipped}
+Static Resources: {list or skipped}
+Custom Labels: {retrieved / skipped}
+Platform Events: {list or skipped}
+Custom Settings: {list or skipped}
+Email Templates: {list or skipped}
+Flows: {list or skipped}
+All files stored locally and ready for trigger analysis in Step 6
 ```
 
 ---
@@ -740,7 +735,7 @@ CHECKPOINT 8.7 — docs/audit-sections/07-phase3.md written
 
 ## Step 8.8 — Assemble Final Audit Plan
 
-Use the Bash tool to concatenate the seven section files directly on disk — do not read them into memory first:
+Run the following Salesforce CLI shell command to concatenate the seven section files directly on disk — do not read them into memory first:
 
 ```
 cat docs/audit-sections/01-header.md \
@@ -780,78 +775,80 @@ Wait for the user's response before continuing.
 
 ---
 
-## Step 9 — Prepare Output Directories
-
-Before writing any file, ensure all required directories exist. Run each mkdir in a single Bash call:
-
-```bash
-mkdir -p force-app/main/default/triggers \
-          force-app/main/default/classes \
-          force-app/main/default/customMetadata
-```
-
-Print:
-```
-CHECKPOINT 9 — output directories ready
-```
-
----
-
-## Step 10 — Generate File 1: Trigger + Metadata
+## Step 9 — Scaffold All Files via CLI
 
 Only proceed if the user replied YES.
 
 Read docs/trigger-audit-plan.md to pick up any edits the user made.
 
-Apply all Apex best practices:
-- One trigger per object, no logic in the trigger body
-- All SOQL queries collected outside loops (bulkified)
-- All DML collected outside loops (bulkified)
-- Recursion guard using a static Boolean isRunning flag
-- Context-aware checks (Trigger.isInsert, Trigger.isUpdate etc.)
-- No hardcoded IDs — use SOQL lookups or Custom Metadata
-- Async pattern for any callouts (flag with comment if original used sync)
-- Null-safe access — check Trigger.new and Trigger.old before use
-- Meaningful method and variable names — no single-letter variables
+Use `sf apex generate` to scaffold all four files. The CLI reads `sourceApiVersion` from `sfdx-project.json` automatically and creates both the source file and its companion `-meta.xml` in one command. Do not create directories or write metadata files manually.
 
-The trigger body: single trigger, only the events present in original triggers, zero business logic, delegates entirely to the handler.
+Run all four scaffold commands:
 
-Write `force-app/main/default/triggers/{objectName}Trigger.trigger` (this file is small — write it in one step).
+```bash
+sf apex generate trigger --name {objectName}Trigger --sobject {objectName} --output-dir force-app/main/default/triggers
 
-Then write the trigger metadata file `force-app/main/default/triggers/{objectName}Trigger.trigger-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<ApexTrigger xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>65.0</apiVersion>
-    <status>Active</status>
-</ApexTrigger>
+sf apex generate class --name {objectName}TriggerHandler --output-dir force-app/main/default/classes
+
+sf apex generate class --name {objectName}TriggerHelper --output-dir force-app/main/default/classes
+
+sf apex generate class --name {objectName}TriggerTest --output-dir force-app/main/default/classes
 ```
 
-**Checkpoint 10a:**
+Each command creates two files: the source file and its `-meta.xml`. Do not touch the `-meta.xml` files — they are complete as generated.
+
+**Checkpoint 9:**
 ```
-CHECKPOINT 10a
+CHECKPOINT 9
+Scaffolded (CLI):
 ✓ force-app/main/default/triggers/{objectName}Trigger.trigger
 ✓ force-app/main/default/triggers/{objectName}Trigger.trigger-meta.xml
+✓ force-app/main/default/classes/{objectName}TriggerHandler.cls
+✓ force-app/main/default/classes/{objectName}TriggerHandler.cls-meta.xml
+✓ force-app/main/default/classes/{objectName}TriggerHelper.cls
+✓ force-app/main/default/classes/{objectName}TriggerHelper.cls-meta.xml
+✓ force-app/main/default/classes/{objectName}TriggerTest.cls
+✓ force-app/main/default/classes/{objectName}TriggerTest.cls-meta.xml
 ```
 
 ---
 
-## Step 11 — Generate File 2: Handler
+## Step 10 — Populate Trigger Body
+
+Apply all Apex best practices:
+- One trigger per object, no logic in the trigger body
+- Only the event contexts present in the original triggers
+- Zero business logic — delegates entirely to the handler
+- Context-aware checks (Trigger.isInsert, Trigger.isUpdate etc.)
+- Null-safe access — check Trigger.new and Trigger.old before use
+
+Use the Edit tool to replace the generated body of `force-app/main/default/triggers/{objectName}Trigger.trigger` with the consolidated trigger. This file is small — replace it in one Edit call.
+
+Do not touch `{objectName}Trigger.trigger-meta.xml`.
+
+**Checkpoint 10:**
+```
+CHECKPOINT 10
+✓ {objectName}Trigger.trigger — body populated
+```
+
+---
+
+## Step 11 — Populate Handler Class
 
 Handler class rules:
 - One public method per trigger context — only for events in the original triggers
 - Static Boolean isRunning recursion guard at the top of the class
-- Each method calls into {objectName}TriggerHelper for the actual logic
-- Comment at top of each method listing source triggers and merged logic
+- Each method delegates to {objectName}TriggerHelper
 - Logic merged in sequence per the Logic Merge Map in docs/trigger-audit-plan.md
 - Duplicate logic: keep one copy, remove duplicates
 - Conflicts: `// CONFLICT: {triggerA} sets X, {triggerB} sets Y — review`
 - Async callouts: `// ASYNC REQUIRED: move to @future or Queueable`
 
-**Write incrementally — one Write/Edit tool call per method. Never hold the entire class in memory before writing.**
+**Populate incrementally — one Edit call per method. Never hold the entire class in memory.**
 
-Step 11a — Write the class opening to `force-app/main/default/classes/{objectName}TriggerHandler.cls` using the Write tool (header only, no methods yet):
-```
+Step 11a — Use the Edit tool to replace the generated class body of `{objectName}TriggerHandler.cls` with the class header (recursion guard, no methods yet):
+```apex
 public class {objectName}TriggerHandler {
 
     // Recursion guard
@@ -863,29 +860,21 @@ public class {objectName}TriggerHandler {
 Print `HANDLER HEADER written`.
 
 Step 11b — For each trigger context (only those present in original triggers, in order: Before Insert, After Insert, Before Update, After Update, Before Delete, After Delete, After Undelete):
-1. Print to chat: `WRITING HANDLER METHOD: {context}`
-2. Use the Edit tool to insert the fully-written method body **before the final closing `}`** in the file
+1. Print: `WRITING HANDLER METHOD: {context}`
+2. Use the Edit tool to insert the fully-written method body before the final closing `}`
 3. Print: `HANDLER METHOD {context} written` before moving to the next
 
-Then write the class metadata file `force-app/main/default/classes/{objectName}TriggerHandler.cls-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>65.0</apiVersion>
-    <status>Active</status>
-</ApexClass>
-```
+Do not touch `{objectName}TriggerHandler.cls-meta.xml`.
 
-**Checkpoint 11a:**
+**Checkpoint 11:**
 ```
-CHECKPOINT 11a
-✓ force-app/main/default/classes/{objectName}TriggerHandler.cls ({n} lines)
-✓ force-app/main/default/classes/{objectName}TriggerHandler.cls-meta.xml
+CHECKPOINT 11
+✓ {objectName}TriggerHandler.cls — {n} methods populated
 ```
 
 ---
 
-## Step 12 — Generate File 3: Helper
+## Step 12 — Populate Helper Class
 
 Helper class rules:
 - All business logic lives here — fully ported from the original triggers
@@ -895,39 +884,31 @@ Helper class rules:
 - Deduplicated: identical logic from multiple triggers appears once
 - Inline comments on each block identifying its source trigger
 
-**Write incrementally — one Write/Edit tool call per method. Never hold the entire class in memory before writing.**
+**Populate incrementally — one Edit call per method. Never hold the entire class in memory.**
 
-Step 12a — Write the class opening to `force-app/main/default/classes/{objectName}TriggerHelper.cls` using the Write tool (header only):
-```
+Step 12a — Use the Edit tool to replace the generated class body of `{objectName}TriggerHelper.cls` with the class header only:
+```apex
 public class {objectName}TriggerHelper {
 }
 ```
 Print `HELPER HEADER written`.
 
 Step 12b — For each trigger context (only those present in original triggers):
-1. Print to chat: `WRITING HELPER METHOD: handle{Context}`
-2. Use the Edit tool to insert the fully-written static method **before the final closing `}`** in the file
+1. Print: `WRITING HELPER METHOD: handle{Context}`
+2. Use the Edit tool to insert the fully-written static method before the final closing `}`
 3. Print: `HELPER METHOD handle{Context} written` before moving to the next
 
-Then write the class metadata file `force-app/main/default/classes/{objectName}TriggerHelper.cls-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>65.0</apiVersion>
-    <status>Active</status>
-</ApexClass>
-```
+Do not touch `{objectName}TriggerHelper.cls-meta.xml`.
 
-**Checkpoint 12a:**
+**Checkpoint 12:**
 ```
-CHECKPOINT 12a
-✓ force-app/main/default/classes/{objectName}TriggerHelper.cls ({n} lines)
-✓ force-app/main/default/classes/{objectName}TriggerHelper.cls-meta.xml
+CHECKPOINT 12
+✓ {objectName}TriggerHelper.cls — {n} methods populated
 ```
 
 ---
 
-## Step 13 — Generate File 4: Test Class
+## Step 13 — Populate Test Class
 
 Test class rules:
 - @IsTest class with @TestSetup for shared test data
@@ -948,10 +929,10 @@ Test class rules:
 
 `System.assertFalse` does not exist in Apex — always negate with `!` inside `System.assert`.
 
-**Write incrementally — one Write/Edit tool call per test group. Never hold the entire class in memory before writing.**
+**Populate incrementally — one Edit call per test group. Never hold the entire class in memory.**
 
-Step 13a — Write the class opening + @TestSetup to `force-app/main/default/classes/{objectName}TriggerTest.cls` using the Write tool:
-```
+Step 13a — Use the Edit tool to replace the generated class body of `{objectName}TriggerTest.cls` with the class header + @TestSetup:
+```apex
 @IsTest
 public class {objectName}TriggerTest {
 
@@ -964,42 +945,18 @@ public class {objectName}TriggerTest {
 Print `TEST SETUP written`.
 
 Step 13b — For each original trigger's test group:
-1. Print to chat: `WRITING TEST GROUP {n}/{total}: {sourceTriggerName}`
-2. Use the Edit tool to insert the test group (single-record test + bulk test) **before the final closing `}`** in the file
+1. Print: `WRITING TEST GROUP {n}/{total}: {sourceTriggerName}`
+2. Use the Edit tool to insert the test group (single-record test + bulk test) before the final closing `}`
 3. Print: `TEST GROUP {n}/{total} written` before moving to the next
 
-Each test group must follow this exact assertion pattern — no exceptions:
-```apex
-// Positive assertion
-System.assertEquals(expectedValue, actualValue, 'message');
-
-// Condition is true
-System.assert(someCondition, 'message');
-
-// Condition is false — ALWAYS negate with ! inside System.assert
-System.assert(!someCondition, 'message');
-
-// Not null
-System.assertNotEquals(null, actualValue, 'message');
-```
-
 **NEVER write:** `System.assertFalse(...)`, `Assert.isFalse(...)`, `Assert.isTrue(...)`, `Assert.areEqual(...)`.
-These do not exist in Apex or require API v56+ and will cause deploy errors.
 
-Then write the class metadata file `force-app/main/default/classes/{objectName}TriggerTest.cls-meta.xml`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>65.0</apiVersion>
-    <status>Active</status>
-</ApexClass>
-```
+Do not touch `{objectName}TriggerTest.cls-meta.xml`.
 
-**Checkpoint 13a:**
+**Checkpoint 13:**
 ```
-CHECKPOINT 13a
-✓ force-app/main/default/classes/{objectName}TriggerTest.cls ({n} lines)
-✓ force-app/main/default/classes/{objectName}TriggerTest.cls-meta.xml
+CHECKPOINT 13
+✓ {objectName}TriggerTest.cls — {n} test groups populated
 ```
 
 ---
